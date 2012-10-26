@@ -1,0 +1,10 @@
+name = blogger import
+description = Interact with remote sites, provides Rules integration.
+package = custom module
+core = 7.x
+
+; Information added by drupal.org packaging script on 2012-05-16
+version = "7.x"
+core = "7.x"
+project = "blogger_import"
+datestamp = "1337161291"

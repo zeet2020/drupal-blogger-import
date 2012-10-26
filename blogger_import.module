@@ -1,0 +1,266 @@
+<?php
+/*
+ *  hook_init
+ *
+ */
+function blogger_import_init(){
+
+ _set_library_path();
+ module_load_include('inc','blogger_import','blogger_import');
+
+ }
+
+function _set_library_path(){
+ static $path;
+ if(!$path){
+  $path = get_include_path();
+  set_include_path($path . PATH_SEPARATOR . drupal_get_path('module','blogger_import')); 
+ }
+}
+
+function blogger_import_menu(){
+
+$items['blogger_import']=array(
+'title' => t('blogger importer'),
+'page callback'=>'drupal_get_form',
+'page arguments' => array('blogger_import_page'),
+'access callback' => TRUE,
+);
+
+$items['blogger_import/done']=array(
+'title' => t('blogger importer'),
+'page callback'=>'blogger_import_done',
+//'page arguments' => array('blogger_import_page'),
+'access callback' => TRUE,
+);
+
+return $items;
+}
+
+
+function blogger_import_page($form,$form_state){
+
+
+if (!empty($form_state['page_num']) && $form_state['page_num'] == 3) {
+    return blogger_import_page_three($form, $form_state);
+  }
+
+if (!empty($form_state['page_num']) && $form_state['page_num'] == 2) {
+    return blogger_import_page_two($form, $form_state);
+  }
+
+$form_state['page_num']=1;
+//collect the user name and password to blogger id
+
+$form['blogger_username']=array(
+'#title'=>'blogspot username',
+'#type'=>'textfield',
+'#required' => TRUE,
+
+);  
+$form['blogger_password']=array(
+'#title'=>'blogspot password',
+'#type'=>'password',
+'#required' => TRUE,
+);  
+ 
+ $form['submit_one']=array(
+'#type' => 'submit',
+'#value'=> t('Next >>'),
+'#required' => TRUE,
+);
+return $form;
+}
+
+
+function blogger_import_page_two($form, $form_state){
+
+$blogger= new blogger_import();
+$blogger_username=$form_state['storage']['blogger_username'];
+$blogger_password=$form_state['storage']['blogger_password'];
+ $blogger->auth($blogger_username,$blogger_password);
+ $feed=$blogger->getBlogIDs();
+$i=0;
+$options=array();
+
+foreach($feed as $ele){
+
+$idText = explode('-', $feed->entries[$i]->id->text);
+$options[$idText[2]] = $ele->title->text;
+$i++;
+}
+
+$form_state['page_num'] = 2; 
+$form['blogs']=array(
+'#type'=>'value',
+'#value'=>$feed,
+);
+$form['blog_id']=array(
+'#title'=>'Select blog from which want to import the posts',
+'#type' => 'radios',
+'#options'=> $options,
+'#required' => TRUE,
+);
+
+
+$form['submit_two']=array(
+'#type' => 'submit',
+'#value'=> t('Next >>'),
+'#required' => TRUE,
+);
+
+return $form;
+
+
+}
+
+
+function blogger_import_page_three($form, $form_state){
+
+ $blogger_username=$form_state['storage']['blogger_username'];
+$blogger_password=$form_state['storage']['blogger_password'];
+$blogger= new blogger_import();
+ $blogger->auth($blogger_username,$blogger_password);
+ $blogid=$form_state['storage']['blog_id'];
+$query = new Zend_Gdata_Query('http://www.blogger.com/feeds/' . $blogid. '/posts/default');
+$query->setMaxResults(5);
+$feed = $blogger->gdClient->getFeed($query);
+	
+		$header = array(
+    'title' =>t('Title'),);
+	
+ 
+ foreach($feed->entries as $obj){
+		if(isset($obj->title->text)){
+		$arr = explode('-', (string)$obj->getId());
+     $id= $arr[2];
+		
+		$options[$id] = array(
+      'title' => $obj->title->text,
+	  'entry' => $obj,
+      
+      //'operations' => array('data' => array('#type' => 'link', '#title' => t('edit'), '#href' => "user/$account->uid/edit", '#options' => array('query' => $destination))),
+    );
+		
+		}
+		}
+ 
+ 
+ $form['posts'] = array(
+    '#type' => 'tableselect',
+    '#header' => $header,
+    '#options' => $options,
+    '#empty' => t('No posts available.'),
+  );
+  $form['pager'] = array('#markup' => theme('pager'));
+  $form['import']=array(
+  '#type' => 'submit',
+  '#value'=>'import',
+  
+  );
+
+  return $form;
+
+}
+
+
+
+
+
+
+
+
+
+
+function blogger_import_page_submit(&$form,&$form_state){
+ if ($form_state['page_num']==3) {
+  $posts=$form_state['values']['posts'];
+  $blogger_username=$form_state['storage']['blogger_username'];
+$blogger_password=$form_state['storage']['blogger_password'];
+	fetch_posts_save($posts,$form_state['storage']['blog_id'],$blogger_username,$blogger_password);
+	//print_r($form_state['storage']);
+	//exit;
+  drupal_goto('blogger_import/done');
+  }
+  
+  if ($form_state['page_num']==2) {
+    
+$index=$form_state['values']['blog_id'];
+$form_state['storage']['blog_id'] = $index;
+$form_state['page_num'] = 3;
+  $form_state['rebuild'] = TRUE;
+}
+
+ if($form_state['page_num']==1){
+ 
+ $form_state['storage']['blogger_username'] = $form_state['values']['blogger_username'];
+ $form_state['storage']['blogger_password'] = $form_state['values']['blogger_password'];
+ $form_state['page_num'] = 2;
+ $form_state['rebuild'] = TRUE;
+ 
+ }
+  
+
+  
+  
+}
+
+function fetch_posts_save($posts=null,$blog_id,$user,$pass){
+$blogger= new blogger_import();
+ $blogger->auth($user,$pass);
+$nodes=array();
+foreach($posts as $postid){
+if($postid){
+
+$query = new Zend_Gdata_Query('http://www.blogger.com/feeds/' . $blog_id . '/posts/default/' . $postid);
+$post = $blogger->gdClient->getEntry($query);
+$node = new StdClass();
+$node->type ='blog';
+$node->title=$post->title->text;
+$node->body=$post->getContent()->getText();
+
+$nodes[]=$node;
+}
+}
+make_nodes($nodes);
+}
+
+
+
+function make_nodes($nodes) {
+    global $user;
+	foreach($nodes as $new_node) {
+		$node = new stdClass();
+                $node->type = 'blog';
+				node_object_prepare($node);
+		$node->status = 1;
+		$node->uid = $user->uid;
+		$node->title = $new_node->title;
+		$node->promote = 1;
+		//$node->created = $new_node['timestamp'];
+		//$node->timestamp = $new_node['timestamp'];
+		$node->sticky = 0;
+		//$node->format = 3;
+		$node->language = LANGUAGE_NONE;
+		
+$node->body[$node->language][0]['value']   = $new_node->body;
+$node->body[$node->language][0]['summary'] = text_summary($new_node->body);
+$node->body[$node->language][0]['format']  = 'full_html';
+		//$node->revision = 0;
+		if($node = node_submit($node)){
+		node_save($node);
+		drupal_set_message($node->nid.' created');
+		}
+	}
+}
+
+
+
+
+function blogger_import_done(){
+return "importing of your posts completed";
+
+}
+
+
+
